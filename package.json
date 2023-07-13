@@ -1,0 +1,14 @@
+{
+  "name": "greyhrloginextension",
+  "version": "1.0.0",
+  "description": "extension to control attendence",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/chrome": "0.0.188"
+  }
+}
