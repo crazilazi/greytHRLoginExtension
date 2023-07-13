@@ -1,2 +1,2 @@
-# GreytHR.Login.Extension
-Auto login to greytHR
+# GreytHR Login Extension
+Auto login/logout to greytHR
