@@ -4,8 +4,14 @@ let loginTryCount = 0;
 let logOutTryCount = 0;
 let loginProcessInterval = undefined;
 let logOutProcessInterval = undefined;
-let loginScheduler = undefined;
-let logOutScheduler = undefined;
+const loggedInText = 'logged in';
+const loggedOutText = 'logged out';
+const signOut = 'sign out';
+const signIn = 'sign in';
+let lastSignalFromFGP = undefined;
+let setSignalForFGP = undefined;
+
+
 /**
  * Retrieve object from Chrome's Local StorageArea
  * @param {string} key 
@@ -22,63 +28,33 @@ getObjectFromLocalStorage = async function (key) {
     });
 };
 
-createNetTabAndLoginOrLogOut = async () => {
+createNetTabAndLoginOrLogOut = async (signal) => {
     const tab = await chrome.tabs.create({
         url: 'https://mri.greythr.com/',
-        active: false,
+        active: true,
     });
     greyThrTabId = tab.id;
-    // setTimeout(() => {
-    //     chrome.scripting.executeScript(
-    //         {
-    //             target: { tabId: greyThrTabId },
-    //             files: ['./foreground_1.js'],
-    //         },
-    //         () => { console.log("Don't worry, The middle man is here...") });
-    // }, 20000);
+    // set signal for foreground processor
+    setSignalForFGP = signal;
 };
 
 chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     // console.log(request);
     if (request.message === "reset") {
         await bootstrap();
-    } else if (request.message === "close the tab") {
+        lastSignalFromFGP = undefined;
+    } else if (request.message === loggedInText) {
+        lastSignalFromFGP = loggedInText;
+        chrome.tabs.remove(sender.tab.id);
+    } else if (request.message === loggedOutText) {
+        lastSignalFromFGP = loggedOutText;
         chrome.tabs.remove(sender.tab.id);
     }
+    else if (request.message === "close the tab") {
+        chrome.tabs.remove(sender.tab.id);
+    }
+    console.log("last signal from FGP", lastSignalFromFGP);
 });
-
-/**
- * Save Object in Chrome's Local StorageArea
- * @param {*} obj 
- */
-saveObjectInLocalStorage = async function (obj) {
-    return new Promise((resolve, reject) => {
-        try {
-            chrome.storage.sync.set(obj, function () {
-                resolve();
-            });
-        } catch (ex) {
-            reject(ex);
-        }
-    });
-};
-
-/**
- * Removes Object from Chrome Local StorageArea.
- *
- * @param {string or array of string keys} keys
- */
-removeObjectFromLocalStorage = async function (keys) {
-    return new Promise((resolve, reject) => {
-        try {
-            chrome.storage.sync.remove(keys, function () {
-                resolve();
-            });
-        } catch (ex) {
-            reject(ex);
-        }
-    });
-};
 
 chrome.tabs.onUpdated.addListener((tabId, updateInfo, tab) => {
     if (tabId === greyThrTabId) {
@@ -89,59 +65,48 @@ chrome.tabs.onUpdated.addListener((tabId, updateInfo, tab) => {
                     target: { tabId: greyThrTabId },
                     files: ['./app/actions/foregroundProcessor.js'],
                 },
-                () => { console.log("Don't worry, The middle man is here...") });
+                () => {
+                    console.log("Don't worry, The middle man is here...");
+                    chrome.tabs.sendMessage(greyThrTabId, { message: setSignalForFGP });
+                });
         } else if (updateInfo.status === 'complete' && tab.url.startsWith('https://mri.greythr.com/uas/portal/auth/login')) {
             chrome.scripting.executeScript(
                 {
                     target: { tabId: greyThrTabId },
                     files: ['./app/actions/foregroundProcessor.js'],
                 },
-                () => { console.log("Don't worry, The middle man is here...") });
+                () => {
+                    console.log("Don't worry, The middle man is here...");
+                });
         }
     }
 });
 
 async function bootstrap() {
     console.log("Initialized");
-    let isUserLoggedIn = await getObjectFromLocalStorage('loggedIn');
-    let isUserLoggedOut = await getObjectFromLocalStorage('loggedOut');
-    const lastUpdated = await getObjectFromLocalStorage('lastUpdated');
-    console.log('isUserLoggedIn', isUserLoggedIn);
-    console.log('lastUpdated', lastUpdated);
     const timeNow = new Date();
-    if (lastUpdated === undefined || new Date(lastUpdated).getDay() < timeNow.getDay()) {
-        isUserLoggedIn = false;
-    }
     const userLogInTime = await getUserLogInTime();
     const userLogOutTime = await getUserLogOutTime();
-
-    if (isUserLoggedIn === undefined || isUserLoggedIn === false) {
-
-        if (loginScheduler) {
-            clearTimeout(loginScheduler);
-        }
-
-        if (userLogInTime.getTime() > timeNow.getTime()) {
-            loginScheduler = setTimeout(() => {
-                initiateLogInProcess();
-            }, userLogInTime.getTime() - timeNow.getTime());
-        } else {
-            createNetTabAndLoginOrLogOut();
+    if (userLogInTime.getTime() > timeNow.getTime()) {
+        console.log(`login scheduled at ${new Date(userLogInTime.getTime())}`);
+        setTimeout(() => {
             initiateLogInProcess();
-        }
+        }, userLogInTime.getTime() - timeNow.getTime());
     } else {
-        if (logOutScheduler) {
-            clearTimeout(logOutScheduler);
-        }
+        console.log("login now");
+        createNetTabAndLoginOrLogOut(signIn);
+    }
 
-        if (userLogOutTime.getTime() > timeNow.getTime()) {
-            logOutScheduler = setTimeout(() => {
-                initiateLogOutProcess();
-            }, userLogOutTime.getTime() - timeNow.getTime());
-        } else {
-            createNetTabAndLoginOrLogOut();
+    if (userLogOutTime.getTime() > timeNow.getTime()) {
+        console.log(`logout scheduled at ${new Date(userLogOutTime.getTime())}`);
+        setTimeout(() => {
             initiateLogOutProcess();
-        }
+        }, userLogOutTime.getTime() - timeNow.getTime());
+    } else {
+        console.log("logout after 20 seconds.");
+        setTimeout(() => {
+            createNetTabAndLoginOrLogOut(signOut);
+        }, 20000);
     }
 };
 
@@ -151,17 +116,13 @@ initiateLogInProcess = async () => {
     }
 
     loginProcessInterval = setInterval(async () => {
-        const isUserLoggedIn = await getObjectFromLocalStorage('loggedIn');
-        const lastUpdated = await getObjectFromLocalStorage('lastUpdated');
-        const timeNow = new Date();
-        if (loginTryCount === 3 || (isUserLoggedIn === true && lastUpdated !== undefined
-            && new Date(lastUpdated).getTime() >= timeNow.getTime())) {
+        if (loginTryCount === 3 || lastSignalFromFGP?.trim() === loggedInText) {
             clearInterval(loginProcessInterval);
             loginTryCount = 0;
         } else {
             loginTryCount++;
             // create new tab and login
-            createNetTabAndLoginOrLogOut();
+            createNetTabAndLoginOrLogOut(signIn);
         }
     }, 60000);
 };
@@ -172,15 +133,14 @@ initiateLogOutProcess = async () => {
     }
 
     logOutProcessInterval = setInterval(async () => {
-        const isUserLoggedIn = await getObjectFromLocalStorage('loggedIn');
-        if (logOutTryCount === 3 || isUserLoggedIn === false) {
+        if (logOutTryCount === 3 || lastSignalFromFGP?.trim() === loggedOutText) {
             clearInterval(logOutProcessInterval);
             logOutTryCount = 0;
 
         } else {
             logOutTryCount++;
             // create new tab and login
-            createNetTabAndLoginOrLogOut();
+            createNetTabAndLoginOrLogOut(signOut);
         }
     }, 60000);
 };
