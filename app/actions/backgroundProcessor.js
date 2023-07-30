@@ -1,3 +1,5 @@
+import { getUserLogInTime, getUserLogOutTime } from './common.js';
+
 let greyThrTabId = 0;
 const maxLoginOrLogOutTry = 3;
 let loginTryCount = 0;
@@ -8,27 +10,11 @@ const loggedInText = 'logged in';
 const loggedOutText = 'logged out';
 const signOut = 'sign out';
 const signIn = 'sign in';
+const reset = 'reset';
 let lastSignalFromFGP = undefined;
 let setSignalForFGP = undefined;
 
-
-/**
- * Retrieve object from Chrome's Local StorageArea
- * @param {string} key 
- */
-getObjectFromLocalStorage = async function (key) {
-    return new Promise((resolve, reject) => {
-        try {
-            chrome.storage.sync.get(key, function (value) {
-                resolve(value[key]);
-            });
-        } catch (ex) {
-            reject(ex);
-        }
-    });
-};
-
-createNetTabAndLoginOrLogOut = async (signal) => {
+async function createNetTabAndLoginOrLogOut(signal) {
     const tab = await chrome.tabs.create({
         url: 'https://mri.greythr.com/',
         active: true,
@@ -39,10 +25,10 @@ createNetTabAndLoginOrLogOut = async (signal) => {
 };
 
 chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
-    // console.log(request);
-    if (request.message === "reset") {
+    console.log(request);
+    if (request.message === reset) {
+        lastSignalFromFGP = reset;
         await bootstrap();
-        lastSignalFromFGP = undefined;
     } else if (request.message === loggedInText) {
         lastSignalFromFGP = loggedInText;
         chrome.tabs.remove(sender.tab.id);
@@ -85,8 +71,20 @@ chrome.tabs.onUpdated.addListener((tabId, updateInfo, tab) => {
 async function bootstrap() {
     console.log("Initialized");
     const timeNow = new Date();
+
+    if (timeNow.getDay() === 6 || timeNow.getDay() === 0) {
+        console.log('Working on weekend is not good for your health.');
+        return;
+    }
+
     const userLogInTime = await getUserLogInTime();
     const userLogOutTime = await getUserLogOutTime();
+
+    if (timeNow.getTime() > userLogOutTime.getTime() && lastSignalFromFGP !== reset) {
+        console.log('Your log out time is expired.');
+        return;
+    }
+
     if (userLogInTime.getTime() > timeNow.getTime()) {
         console.log(`login scheduled at ${new Date(userLogInTime.getTime())}`);
         setTimeout(() => {
@@ -110,7 +108,7 @@ async function bootstrap() {
     }
 };
 
-initiateLogInProcess = async () => {
+async function initiateLogInProcess() {
     if (loginProcessInterval) {
         clearInterval(loginProcessInterval);
     }
@@ -127,7 +125,7 @@ initiateLogInProcess = async () => {
     }, 60000);
 };
 
-initiateLogOutProcess = async () => {
+async function initiateLogOutProcess() {
     if (logOutProcessInterval) {
         clearInterval(logOutProcessInterval);
     }
@@ -144,23 +142,5 @@ initiateLogOutProcess = async () => {
         }
     }, 60000);
 };
-
-getUserLogInTime = async () => {
-    let logTime = await getObjectFromLocalStorage('logInTime');
-    console.log(logTime);
-    logTime = logTime === undefined ? "09:00" : logTime;
-    const logInTimeInHours = Number.parseInt(logTime.split(':')[0]);
-    const logInTimeInMinutes = Number.parseInt(logTime.split(':')[1]);
-    return new Date(new Date().setHours(logInTimeInHours, logInTimeInMinutes, 0, 0));
-}
-
-getUserLogOutTime = async () => {
-    let logOutTime = await getObjectFromLocalStorage('logOutTime');
-    console.log(logOutTime);
-    logOutTime = logOutTime === undefined ? "18:00" : logOutTime;
-    const logOutTimeInHours = Number.parseInt(logOutTime.split(':')[0]);
-    const logOutTimeInMinutes = Number.parseInt(logOutTime.split(':')[1]);
-    return new Date(new Date().setHours(logOutTimeInHours, logOutTimeInMinutes, 0, 0));
-}
 
 bootstrap();
