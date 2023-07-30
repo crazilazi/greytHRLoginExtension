@@ -5,8 +5,6 @@
 export async function getObjectFromLocalStorage(key) {
     return new Promise((resolve, reject) => {
         try {
-            // console.log('key', key);
-            // console.log('chrome.storage', chrome.storage);
             chrome.storage.sync.get(key, function (value) {
                 resolve(value[key]);
             });
@@ -72,3 +70,18 @@ export async function getUserLogOutTime() {
     const logOutTimeInMinutes = Number.parseInt(logOutTime.split(':')[1]);
     return new Date(new Date().setHours(logOutTimeInHours, logOutTimeInMinutes, 0, 0));
 };
+
+/** Get current user's is and password from Chrome's Local StorageArea
+ * @returns {object}
+ */
+export async function getUserCredentials() {
+    return new Promise((resolve, reject) => {
+        try {
+            chrome.storage.sync.get(['huha', 'hahu'], function (value) {
+                resolve({ id: value.huha, password: value.hahu });
+            });
+        } catch (ex) {
+            reject(ex);
+        }
+    });
+}

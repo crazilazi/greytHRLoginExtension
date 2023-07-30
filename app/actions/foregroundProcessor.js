@@ -1,4 +1,3 @@
-// import { getObjectFromLocalStorage } from './common.js';
 (async () => {
     const src = chrome.runtime.getURL("/app/actions/common.js");
     const common = await import(src);
@@ -74,8 +73,9 @@
 
     doLoginToGreyThr = async () => {
         console.log('Im at login page');
-        const userId = await common.getObjectFromLocalStorage('huha');
-        const password = await common.getObjectFromLocalStorage('hahu');
+        const user = await common.getUserCredentials();
+        const userId = user.id;
+        const password = user.password;
         let loginBtn = undefined;
         try {
             loginBtn = document.getElementsByTagName('form')[0].getElementsByTagName("button")[0];

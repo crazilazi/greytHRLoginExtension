@@ -1,4 +1,4 @@
-import { getUserLogInTime, getUserLogOutTime } from './common.js';
+import { getUserLogInTime, getUserLogOutTime, getUserCredentials } from './common.js';
 
 let greyThrTabId = 0;
 const maxLoginOrLogOutTry = 3;
@@ -70,6 +70,11 @@ chrome.tabs.onUpdated.addListener((tabId, updateInfo, tab) => {
 
 async function bootstrap() {
     console.log("Initialized");
+    const user = await getUserCredentials();
+    if (user.id === undefined || user.password === undefined) {
+        chrome.runtime.openOptionsPage();
+        return;
+    }
     const timeNow = new Date();
 
     if (timeNow.getDay() === 6 || timeNow.getDay() === 0) {
@@ -114,7 +119,7 @@ async function initiateLogInProcess() {
     }
 
     loginProcessInterval = setInterval(async () => {
-        if (loginTryCount === 3 || lastSignalFromFGP?.trim() === loggedInText) {
+        if (loginTryCount === maxLoginOrLogOutTry || lastSignalFromFGP?.trim() === loggedInText) {
             clearInterval(loginProcessInterval);
             loginTryCount = 0;
         } else {
@@ -131,7 +136,7 @@ async function initiateLogOutProcess() {
     }
 
     logOutProcessInterval = setInterval(async () => {
-        if (logOutTryCount === 3 || lastSignalFromFGP?.trim() === loggedOutText) {
+        if (logOutTryCount === maxLoginOrLogOutTry || lastSignalFromFGP?.trim() === loggedOutText) {
             clearInterval(logOutProcessInterval);
             logOutTryCount = 0;
 
