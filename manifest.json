@@ -11,7 +11,8 @@
     "128": "/app/styles/icons/128.png"
   },
   "background": {
-    "service_worker": "/app/actions/backgroundProcessor.js"
+    "service_worker": "/app/actions/backgroundProcessor.js",
+    "type": "module"
   },
   "options_page": "./options.html",
   "action": {
@@ -25,14 +26,12 @@
     },
     "default_popup": "popup.html"
   },
-  "permissions": [
-    "cookies",
-    "storage",
-    "tabs",
-    "scripting",
-    "webNavigation",
-    "http://*/",
-    "https://*/"
+  "web_accessible_resources": [
+    {
+      "matches": ["https://mri.greythr.com/*"],
+      "resources": ["/app/actions/common.js"]
+    }
   ],
+  "permissions": ["cookies", "storage", "tabs", "scripting", "webNavigation"],
   "host_permissions": ["<all_urls>"]
 }
