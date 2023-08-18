@@ -1,4 +1,4 @@
-import { getUserLogInTime, getUserLogOutTime, getUserCredentials } from './common.js';
+import { getUserLogInTime, getUserLogOutTime, getUserCredentials, getObjectFromTemporaryStorage } from './common.js';
 
 let greyThrTabId = 0;
 const maxLoginOrLogOutTry = 3;
@@ -69,8 +69,11 @@ chrome.tabs.onUpdated.addListener((tabId, updateInfo, tab) => {
 });
 
 async function bootstrap() {
+
     console.log("Initialized");
     const user = await getUserCredentials();
+    const lastSignalSavedFromFGP = await getObjectFromTemporaryStorage('lastSignalFromFGP');
+    console.log("last signal saved from FGP", lastSignalSavedFromFGP);
     if (user.id === undefined || user.password === undefined) {
         chrome.runtime.openOptionsPage();
         return;
@@ -90,26 +93,32 @@ async function bootstrap() {
         return;
     }
 
-    if (userLogInTime.getTime() > timeNow.getTime()) {
-        console.log(`login scheduled at ${new Date(userLogInTime.getTime())}`);
-        setTimeout(() => {
-            initiateLogInProcess();
-        }, userLogInTime.getTime() - timeNow.getTime());
-    } else {
-        console.log("login now");
-        createNetTabAndLoginOrLogOut(signIn);
+    if (lastSignalSavedFromFGP === undefined) {
+
+        if (userLogInTime.getTime() > timeNow.getTime()) {
+            console.log(`login scheduled at ${new Date(userLogInTime.getTime())}`);
+            setTimeout(() => {
+                initiateLogInProcess();
+            }, userLogInTime.getTime() - timeNow.getTime());
+        } else {
+            console.log("login now");
+            createNetTabAndLoginOrLogOut(signIn);
+        }
     }
 
-    if (userLogOutTime.getTime() > timeNow.getTime()) {
-        console.log(`logout scheduled at ${new Date(userLogOutTime.getTime())}`);
-        setTimeout(() => {
-            initiateLogOutProcess();
-        }, userLogOutTime.getTime() - timeNow.getTime());
-    } else {
-        console.log("logout after 20 seconds.");
-        setTimeout(() => {
-            createNetTabAndLoginOrLogOut(signOut);
-        }, 20000);
+    if (lastSignalSavedFromFGP === undefined || lastSignalSavedFromFGP === loggedInText) {
+
+        if (userLogOutTime.getTime() > timeNow.getTime()) {
+            console.log(`logout scheduled at ${new Date(userLogOutTime.getTime())}`);
+            setTimeout(() => {
+                initiateLogOutProcess();
+            }, userLogOutTime.getTime() - timeNow.getTime());
+        } else {
+            console.log("logout after 20 seconds.");
+            setTimeout(() => {
+                createNetTabAndLoginOrLogOut(signOut);
+            }, 20000);
+        }
     }
 };
 
@@ -148,4 +157,11 @@ async function initiateLogOutProcess() {
     }, 60000);
 };
 
+async function defaultSettings() {
+    await chrome.storage.session.setAccessLevel({
+        accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS',
+    })
+};
+
+defaultSettings();
 bootstrap();
