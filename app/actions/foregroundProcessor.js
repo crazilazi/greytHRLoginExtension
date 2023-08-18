@@ -113,8 +113,10 @@
 
             if (lastSignalFromBGP === signOut) {
                 signInAndSignOutBtn.click();
+                await common.saveObjectInTemporaryStorage({ "lastSignalFromFGP": loggedOutText });
                 chrome.runtime.sendMessage({ message: loggedOutText });
             } else if (lastSignalFromBGP === signIn) {
+                await common.saveObjectInTemporaryStorage({ "lastSignalFromFGP": loggedInText });
                 chrome.runtime.sendMessage({ message: loggedInText });
             }
             else {
@@ -123,15 +125,20 @@
         } else if (signInAndSignOutBtn.shadowRoot.childNodes[0].innerText.trim().toLowerCase() === signIn) {
 
             if (lastSignalFromBGP === signOut) {
+                await common.saveObjectInTemporaryStorage({ "lastSignalFromFGP": loggedOutText });
                 chrome.runtime.sendMessage({ message: loggedOutText });
             } else if (lastSignalFromBGP === signIn) {
                 signInAndSignOutBtn.click();
+                await common.saveObjectInTemporaryStorage({ "lastSignalFromFGP": loggedInText });
                 chrome.runtime.sendMessage({ message: loggedInText });
             }
             else {
                 chrome.runtime.sendMessage({ message: "close the tab" });
             }
         }
+        const lastSignalSavedFromFGP = await common.getObjectFromTemporaryStorage('lastSignalFromFGP');
+
+        console.log("last signal saved from FGP", lastSignalSavedFromFGP);
     }
     bootstrap();
 })();

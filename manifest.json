@@ -1,7 +1,7 @@
 {
   "name": "Rajeev greytHR notification",
   "description": "greytHR login notification",
-  "version": "1.0.0",
+  "version": "1.0.4",
   "manifest_version": 3,
   "icons": {
     "16": "/app/styles/icons/16.png",

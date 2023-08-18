@@ -31,6 +31,38 @@ export async function saveObjectInLocalStorage(obj) {
 };
 
 /**
+ * Get information from Chrome's Temporary Storage
+ * @param {string} key 
+ */
+export async function getObjectFromTemporaryStorage(key) {
+    return new Promise((resolve, reject) => {
+        try {
+            chrome.storage.session.get(key, function (value) {
+                resolve(value[key]);
+            });
+        } catch (ex) {
+            reject(ex);
+        }
+    });
+};
+
+/**
+ * Save Object in Chrome's Temporary Storage
+ * @param {*} obj 
+ */
+export async function saveObjectInTemporaryStorage(obj) {
+    return new Promise((resolve, reject) => {
+        try {
+            chrome.storage.session.set(obj, function () {
+                resolve();
+            });
+        } catch (ex) {
+            reject(ex);
+        }
+    });
+};
+
+/**
  * Removes Object from Chrome Local StorageArea.
  *
  * @param {string or array of string keys} keys
