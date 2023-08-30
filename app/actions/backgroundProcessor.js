@@ -88,10 +88,10 @@ async function bootstrap() {
     const userLogInTime = await getUserLogInTime();
     const userLogOutTime = await getUserLogOutTime();
 
-    if (timeNow.getTime() > userLogOutTime.getTime() && lastSignalFromFGP !== reset) {
-        console.log('Your log out time is expired.');
-        return;
-    }
+    // if (timeNow.getTime() > userLogOutTime.getTime() && lastSignalFromFGP !== reset) {
+    //     console.log('Your log out time is expired.');
+    //     return;
+    // }
 
     if (lastSignalSavedFromFGP === undefined) {
 
