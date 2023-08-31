@@ -24,6 +24,9 @@ async function createNetTabAndLoginOrLogOut(signal) {
     setSignalForFGP = signal;
 };
 
+const keepAlive = () => setInterval(chrome.runtime.getPlatformInfo, 20e3);
+chrome.runtime.onStartup.addListener(keepAlive);
+
 chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     console.log(request);
     if (request.message === reset) {
@@ -157,10 +160,19 @@ async function initiateLogOutProcess() {
     }, 60000);
 };
 
+async function sendMessageToActiveTab(message) {
+    let queryOptions = { active: true };
+    // `tab` will either be a `tabs.Tab` instance or `undefined`.
+    const [tab] = await chrome.tabs.query(queryOptions);
+    const response = await chrome.tabs.sendMessage(tab.id, message);
+    console.log("I'm up and running", response);
+};
+
 async function defaultSettings() {
     await chrome.storage.session.setAccessLevel({
         accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS',
     })
+    keepAlive();
 };
 
 defaultSettings();
