@@ -1,5 +1,5 @@
 import { getUserLogInTime, getUserLogOutTime, getUserCredentials, getObjectFromTemporaryStorage } from './common.js';
-
+// variables
 let greyThrTabId = 0;
 const maxLoginOrLogOutTry = 3;
 let loginTryCount = 0;
@@ -16,7 +16,7 @@ let setSignalForFGP = undefined;
 
 async function createNetTabAndLoginOrLogOut(signal) {
     const tab = await chrome.tabs.create({
-        url: 'https://mri.greythr.com/',
+        url: 'https://advtsoftware.greythr.com/',
         active: true,
     });
     greyThrTabId = tab.id;
@@ -48,7 +48,7 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
 chrome.tabs.onUpdated.addListener((tabId, updateInfo, tab) => {
     if (tabId === greyThrTabId) {
         // console.log(tabId, updateInfo, tab);
-        if (updateInfo.status === 'complete' && tab.url === 'https://mri.greythr.com/v3/portal/ess/home') {
+        if (updateInfo.status === 'complete' && tab.url === 'https://advtsoftware.greythr.com/v3/portal/ess/home') {
             chrome.scripting.executeScript(
                 {
                     target: { tabId: greyThrTabId },
@@ -58,7 +58,7 @@ chrome.tabs.onUpdated.addListener((tabId, updateInfo, tab) => {
                     console.log("Don't worry, The middle man is here...");
                     chrome.tabs.sendMessage(greyThrTabId, { message: setSignalForFGP });
                 });
-        } else if (updateInfo.status === 'complete' && tab.url.startsWith('https://mri.greythr.com/uas/portal/auth/login')) {
+        } else if (updateInfo.status === 'complete' && tab.url.startsWith('https://advtsoftware.greythr.com/uas/portal/auth/login')) {
             chrome.scripting.executeScript(
                 {
                     target: { tabId: greyThrTabId },
