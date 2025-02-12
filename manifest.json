@@ -28,10 +28,22 @@
   },
   "web_accessible_resources": [
     {
-      "matches": ["https://mri.greythr.com/*"],
-      "resources": ["/app/actions/common.js"]
+      "matches": [
+        "https://advtsoftware.greythr.com/*"
+      ],
+      "resources": [
+        "/app/actions/common.js"
+      ]
     }
   ],
-  "permissions": ["cookies", "storage", "tabs", "scripting", "webNavigation"],
-  "host_permissions": ["<all_urls>"]
+  "permissions": [
+    "cookies",
+    "storage",
+    "tabs",
+    "scripting",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ]
 }
