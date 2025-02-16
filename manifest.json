@@ -41,9 +41,13 @@
     "storage",
     "tabs",
     "scripting",
-    "webNavigation"
+    "webNavigation",
+    "notifications"
   ],
   "host_permissions": [
     "<all_urls>"
-  ]
+  ],
+  "config": {
+    "main_url": "https://advtsoftware.greythr.com/"
+  }
 }
