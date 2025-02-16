@@ -1,55 +1,44 @@
+// app/app.js
+// Initialize Flatpickr for holidays
+const fpHolidays = flatpickr(document.querySelector('#holidays'), {
+    mode: 'multiple', // Allow multiple date selections
+    dateFormat: 'Y-m-d', // Format as YYYY-MM-DD
+    defaultDate: [], // No default dates
+    inline: true, // Show calendar inline
+    onChange: function (selectedDates, dateStr, instance) {
+        console.log('Selected holidays:', dateStr);
+    }
+});
+
+// Save holidays when the user clicks "Save"
 const btnSave = document.getElementById('btnSave');
 btnSave.addEventListener('click', () => {
     const logInTime = document.getElementById('loginTime').value;
     const logOutTime = document.getElementById('logOutTime').value;
     const huha = document.getElementById('huha').value;
     const hahu = document.getElementById('hahu').value;
+    const holidays = fpHolidays.selectedDates.map(date => date.toISOString().split('T')[0]); // Format as YYYY-MM-DD
 
-    chrome.storage.sync.set({ 'logInTime': logInTime, 'logOutTime': logOutTime, 'hahu': hahu, 'huha': huha }, () => {
+    chrome.storage.sync.set({ 'logInTime': logInTime, 'logOutTime': logOutTime, 'hahu': hahu, 'huha': huha, 'holidays': holidays }, () => {
         console.log("Setting logIn and logOut time.", { 'logInTime': logInTime, 'logOutTime': logOutTime });
         chrome.runtime.sendMessage({ message: 'reset' });
-        alert("Your log in and log out time is set.")
+        alert("Your log in and log out time is set.");
     });
-})
+});
 
-const btnReset = document.getElementById('btnReset');
-btnReset.addEventListener('click', () => {
-    chrome.storage.sync.remove(['logInTime', 'logOutTime', 'loggedIn', 'loggedOut', 'hahu', 'huha'], () => {
-        console.log('removed', ['loginTime', 'logOutTime', 'loggedIn', 'loggedOut']);
-        document.getElementById('loginTime').value = "09:00";
-        document.getElementById('logOutTime').value = "18:00";
-        document.getElementById('hahu').value = "";
-        document.getElementById('huha').value = "";
-        alert("You are free to fly.")
-    });
-})
-
-chrome.storage.sync.get(['logInTime'], (result) => {
-    console.log("GET", result);
-    if (Object.keys(result).length !== 0) {
-        document.getElementById('loginTime').value = result.logInTime;
+// Load saved holidays when the page loads
+chrome.storage.sync.get(['holidays'], (result) => {
+    if (result.holidays) {
+        fpHolidays.setDate(result.holidays); // Set selected dates in the calendar
     }
 });
 
-chrome.storage.sync.get(['logOutTime'], (result) => {
-    console.log("GET", result);
-    if (Object.keys(result).length !== 0) {
-        document.getElementById('logOutTime').value = result.logOutTime;
-    }
-});
-
-chrome.storage.sync.get(['huha'], (result) => {
-    console.log("GET", result);
-    if (Object.keys(result).length !== 0) {
-        document.getElementById('huha').value = result.huha;
-    }
-});
-
-chrome.storage.sync.get(['hahu'], (result) => {
-    console.log("GET", result);
-    if (Object.keys(result).length !== 0) {
-        document.getElementById('hahu').value = result.hahu;
-    }
+chrome.storage.sync.get(['logInTime', 'logOutTime', 'huha', 'hahu', 'holidays'], (result) => {
+    if (result.logInTime) document.getElementById('loginTime').value = result.logInTime;
+    if (result.logOutTime) document.getElementById('logOutTime').value = result.logOutTime;
+    if (result.huha) document.getElementById('huha').value = result.huha;
+    if (result.hahu) document.getElementById('hahu').value = result.hahu;
+    if (result.holidays) document.getElementById('holidays').value = result.holidays.join(', ');
 });
 
 const fpLogIn = flatpickr(document.querySelector('#loginTime'), {
@@ -57,10 +46,7 @@ const fpLogIn = flatpickr(document.querySelector('#loginTime'), {
     noCalendar: true,
     dateFormat: "H:i",
     time_24hr: true,
-    defaultDate: "09:00",
-    onChange: function (selectedDates, dateStr, instance) {
-        console.log('date: ', dateStr);
-    }
+    defaultDate: "09:00"
 });
 
 const fpLogOut = flatpickr(document.querySelector('#logOutTime'), {
@@ -68,10 +54,5 @@ const fpLogOut = flatpickr(document.querySelector('#logOutTime'), {
     noCalendar: true,
     dateFormat: "H:i",
     time_24hr: true,
-    defaultDate: "18:00",
-    onChange: function (selectedDates, dateStr, instance) {
-        console.log('date: ', dateStr);
-    }
+    defaultDate: "18:00"
 });
-
-

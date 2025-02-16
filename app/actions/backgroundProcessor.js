@@ -1,5 +1,6 @@
-import { getUserLogInTime, getUserLogOutTime, getUserCredentials, getObjectFromTemporaryStorage } from './common.js';
-// variables
+// app/actions/backgroundProcessor.js
+import { getUserLogInTime, getUserLogOutTime, getUserCredentials, getObjectFromTemporaryStorage, getObjectFromLocalStorage } from './common.js';
+
 let greyThrTabId = 0;
 const maxLoginOrLogOutTry = 3;
 let loginTryCount = 0;
@@ -20,7 +21,6 @@ async function createNetTabAndLoginOrLogOut(signal) {
         active: true,
     });
     greyThrTabId = tab.id;
-    // set signal for foreground processor
     setSignalForFGP = signal;
 };
 
@@ -28,8 +28,13 @@ const keepAlive = () => setInterval(chrome.runtime.getPlatformInfo, 20e3);
 chrome.runtime.onStartup.addListener(keepAlive);
 
 chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
-    console.log(request);
     if (request.message === reset) {
+        // Clear the existing logout timeout
+        const { logoutTimeoutId } = await chrome.storage.session.get('logoutTimeoutId');
+        if (logoutTimeoutId) {
+            clearTimeout(logoutTimeoutId);
+        }
+
         lastSignalFromFGP = reset;
         await bootstrap();
     } else if (request.message === loggedInText) {
@@ -38,16 +43,13 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     } else if (request.message === loggedOutText) {
         lastSignalFromFGP = loggedOutText;
         chrome.tabs.remove(sender.tab.id);
-    }
-    else if (request.message === "close the tab") {
+    } else if (request.message === "close the tab") {
         chrome.tabs.remove(sender.tab.id);
     }
-    console.log("last signal from FGP", lastSignalFromFGP);
 });
 
 chrome.tabs.onUpdated.addListener((tabId, updateInfo, tab) => {
     if (tabId === greyThrTabId) {
-        // console.log(tabId, updateInfo, tab);
         if (updateInfo.status === 'complete' && tab.url === 'https://advtsoftware.greythr.com/v3/portal/ess/home') {
             chrome.scripting.executeScript(
                 {
@@ -55,7 +57,6 @@ chrome.tabs.onUpdated.addListener((tabId, updateInfo, tab) => {
                     files: ['./app/actions/foregroundProcessor.js'],
                 },
                 () => {
-                    console.log("Don't worry, The middle man is here...");
                     chrome.tabs.sendMessage(greyThrTabId, { message: setSignalForFGP });
                 });
         } else if (updateInfo.status === 'complete' && tab.url.startsWith('https://advtsoftware.greythr.com/uas/portal/auth/login')) {
@@ -64,66 +65,145 @@ chrome.tabs.onUpdated.addListener((tabId, updateInfo, tab) => {
                     target: { tabId: greyThrTabId },
                     files: ['./app/actions/foregroundProcessor.js'],
                 },
-                () => {
-                    console.log("Don't worry, The middle man is here...");
-                });
+                () => { });
         }
     }
 });
 
-async function bootstrap() {
+// Function to send notifications
+function sendNotification(title, message) {
+    chrome.notifications.create({
+        type: 'basic',
+        iconUrl: '/app/styles/icons/48.png', // Path to your extension's icon
+        title: title,
+        message: message,
+        priority: 2 // High priority
+    });
+}
 
-    console.log("Initialized");
+// Example: Notify user when login is successful
+async function handleLogin() {
+    sendNotification('Login Successful', 'You have been logged in successfully.');
+}
+
+// Example: Notify user when logout is successful
+async function handleLogout() {
+    sendNotification('Logout Successful', 'You have been logged out successfully.');
+}
+
+// Example: Notify user when session is extended
+async function handleSessionExtension(extensionTime) {
+    sendNotification('Session Extended', `Your session has been extended by ${extensionTime} minutes.`);
+}
+
+// Example: Notify user 10 minutes before logout
+async function notifyBeforeLogout() {
+    sendNotification('Logout Reminder', 'You will be logged out in 10 minutes.');
+}
+
+// Modify the bootstrap function to include notifications
+async function bootstrap() {
     const user = await getUserCredentials();
     const lastSignalSavedFromFGP = await getObjectFromTemporaryStorage('lastSignalFromFGP');
-    console.log("last signal saved from FGP", lastSignalSavedFromFGP);
     if (user.id === undefined || user.password === undefined) {
         chrome.runtime.openOptionsPage();
         return;
     }
     const timeNow = new Date();
+    const holidays = await getObjectFromLocalStorage('holidays') || [];
+    const today = timeNow.toISOString().split('T')[0];
 
-    if (timeNow.getDay() === 6 || timeNow.getDay() === 0) {
-        console.log('Working on weekend is not good for your health.');
+    // Check if today is a holiday or weekend
+    if (holidays.includes(today) || timeNow.getDay() === 6 || timeNow.getDay() === 0) {
+        sendNotification('Holiday/Weekend', 'Today is a holiday or weekend. No login/logout will occur.');
         return;
     }
 
     const userLogInTime = await getUserLogInTime();
     const userLogOutTime = await getUserLogOutTime();
 
-    // if (timeNow.getTime() > userLogOutTime.getTime() && lastSignalFromFGP !== reset) {
-    //     console.log('Your log out time is expired.');
-    //     return;
-    // }
-
     if (lastSignalSavedFromFGP === undefined) {
-
         if (userLogInTime.getTime() > timeNow.getTime()) {
-            console.log(`login scheduled at ${new Date(userLogInTime.getTime())}`);
-            setTimeout(() => {
-                initiateLogInProcess();
-            }, userLogInTime.getTime() - timeNow.getTime());
+            setTimeout(() => initiateLogInProcess(), userLogInTime.getTime() - timeNow.getTime());
         } else {
-            console.log("login now");
             createNetTabAndLoginOrLogOut(signIn);
+            handleLogin(); // Notify user about login
         }
     }
 
     if (lastSignalSavedFromFGP === undefined || lastSignalSavedFromFGP === loggedInText) {
-
         if (userLogOutTime.getTime() > timeNow.getTime()) {
-            console.log(`logout scheduled at ${new Date(userLogOutTime.getTime())}`);
-            setTimeout(() => {
-                initiateLogOutProcess();
-            }, userLogOutTime.getTime() - timeNow.getTime());
+            const notifyTime = new Date(userLogOutTime.getTime() - 600000); // Notify 10 minutes before
+            if (notifyTime > timeNow) {
+                setTimeout(() => promptForExtension(userLogOutTime), notifyTime.getTime() - timeNow.getTime());
+            }
+
+            // Schedule the initial logout process
+            let logoutTimeout = setTimeout(() => initiateLogOutProcess(), userLogOutTime.getTime() - timeNow.getTime());
+
+            // Store the timeout ID so it can be cleared later
+            chrome.storage.session.set({ logoutTimeoutId: logoutTimeout });
         } else {
-            console.log("logout after 20 seconds.");
             setTimeout(() => {
                 createNetTabAndLoginOrLogOut(signOut);
+                handleLogout(); // Notify user about logout
             }, 20000);
         }
     }
-};
+}
+
+// Example: Notify user when session is extended
+async function promptForExtension(userLogOutTime) {
+    const response = await chrome.notifications.create({
+        type: 'basic',
+        iconUrl: '/app/styles/icons/48.png',
+        title: 'Logout Reminder',
+        message: 'You will be logged out in 10 minutes. Do you want to extend your session?',
+        buttons: [
+            { title: 'Extend by 30 minutes' },
+            { title: 'Extend by 1 hour' }
+        ],
+        priority: 2
+    });
+
+    chrome.notifications.onButtonClicked.addListener(async (notificationId, buttonIndex) => {
+        if (notificationId === response) {
+            let extensionTime = 0;
+            if (buttonIndex === 0) {
+                extensionTime = 30; // 30 minutes
+            } else if (buttonIndex === 1) {
+                extensionTime = 60; // 1 hour
+            }
+
+            if (extensionTime > 0) {
+                // Calculate the new logout time
+                const newLogOutTime = new Date(userLogOutTime.getTime() + extensionTime * 60 * 1000);
+
+                // Save the new logout time in Chrome's storage
+                await chrome.storage.sync.set({ 'logOutTime': newLogOutTime.toTimeString().split(' ')[0] });
+
+                // Clear the existing logout timeout
+                const { logoutTimeoutId } = await chrome.storage.session.get('logoutTimeoutId');
+                if (logoutTimeoutId) {
+                    clearTimeout(logoutTimeoutId);
+                }
+
+                // Schedule a new logout process
+                const timeNow = new Date();
+                const newLogoutTimeout = setTimeout(() => initiateLogOutProcess(), newLogOutTime.getTime() - timeNow.getTime());
+
+                // Save the new timeout ID
+                await chrome.storage.session.set({ logoutTimeoutId: newLogoutTimeout });
+
+                // Notify the user about the session extension
+                handleSessionExtension(extensionTime);
+
+                // Clear the notification
+                chrome.notifications.clear(response);
+            }
+        }
+    });
+}
 
 async function initiateLogInProcess() {
     if (loginProcessInterval) {
