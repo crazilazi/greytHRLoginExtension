@@ -168,22 +168,24 @@ const INITIALIZED_KEY = 'isInitialized';
 
 const init = async () => {
     // Check if already initialized
-    const storedInitializedKey = await getObjectFromLocalStorage(INITIALIZED_KEY);
-    console.log(storedInitializedKey);
-    if (storedInitializedKey) {
+    const { [INITIALIZED_KEY]: isInitialized = false } = await getObjectFromLocalStorage(INITIALIZED_KEY);
+    console.log(isInitialized);
+    if (isInitialized) {
         console.log('Extension already initialized.');
         return;
     }
 
+    // Mark as initialized
+    await saveObjectInLocalStorage({ INITIALIZED_KEY: true });
+
     // Perform initialization
     try {
         await chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' });
-        lastSignalFromFGP = await getObjectFromLocalStorage("lastSignalFromFGP");
+        const { _lastSignalFromFGP } = await getObjectFromLocalStorage("lastSignalFromFGP");
+        lastSignalFromFGP = _lastSignalFromFGP;
         console.log('Background script loaded.', lastSignalFromFGP);
         chrome.runtime.onMessage.addListener(handleMessage);
         await scheduleDay();
-        // Mark as initialized
-        await saveObjectInLocalStorage({ INITIALIZED_KEY: true });
     } catch (ex) {
         console.error('Initialization failed.', ex);
     }
@@ -193,13 +195,13 @@ const init = async () => {
 chrome.runtime.onInstalled.addListener(async (details) => {
     if (details.reason === 'install' || details.reason === 'update') {
         await removeObjectFromLocalStorage(INITIALIZED_KEY);
+        init();
         console.log('Extension installed/updated. Initialization flag cleared.');
     }
 });
 
 chrome.runtime.onStartup.addListener(async () => {
     await removeObjectFromLocalStorage(INITIALIZED_KEY);
+    init();
     console.log('Browser started. Initialization flag cleared.');
 });
-
-init();
