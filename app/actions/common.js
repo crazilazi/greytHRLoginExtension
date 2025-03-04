@@ -3,15 +3,7 @@
  * @param {string} key 
  */
 export async function getObjectFromLocalStorage(key) {
-    return new Promise((resolve, reject) => {
-        try {
-            chrome.storage.sync.get(key, function (value) {
-                resolve(value[key]);
-            });
-        } catch (ex) {
-            reject(ex);
-        }
-    });
+    return await chrome.storage.local.get(key);
 };
 
 /**
@@ -19,15 +11,7 @@ export async function getObjectFromLocalStorage(key) {
  * @param {*} obj 
  */
 export async function saveObjectInLocalStorage(obj) {
-    return new Promise((resolve, reject) => {
-        try {
-            chrome.storage.sync.set(obj, function () {
-                resolve();
-            });
-        } catch (ex) {
-            reject(ex);
-        }
-    });
+    await chrome.storage.local.set(obj);
 };
 
 /**
@@ -35,15 +19,7 @@ export async function saveObjectInLocalStorage(obj) {
  * @param {string} key 
  */
 export async function getObjectFromTemporaryStorage(key) {
-    return new Promise((resolve, reject) => {
-        try {
-            chrome.storage.session.get(key, function (value) {
-                resolve(value[key]);
-            });
-        } catch (ex) {
-            reject(ex);
-        }
-    });
+    return chrome.storage.session.get(key);
 };
 
 /**
@@ -51,15 +27,7 @@ export async function getObjectFromTemporaryStorage(key) {
  * @param {*} obj 
  */
 export async function saveObjectInTemporaryStorage(obj) {
-    return new Promise((resolve, reject) => {
-        try {
-            chrome.storage.session.set(obj, function () {
-                resolve();
-            });
-        } catch (ex) {
-            reject(ex);
-        }
-    });
+    return await chrome.storage.session.set(obj);
 };
 
 /**
@@ -68,15 +36,7 @@ export async function saveObjectInTemporaryStorage(obj) {
  * @param {string or array of string keys} keys
  */
 export async function removeObjectFromLocalStorage(keys) {
-    return new Promise((resolve, reject) => {
-        try {
-            chrome.storage.sync.remove(keys, function () {
-                resolve();
-            });
-        } catch (ex) {
-            reject(ex);
-        }
-    });
+    return await chrome.storage.sync.remove(keys);
 };
 
 /**
@@ -84,7 +44,7 @@ export async function removeObjectFromLocalStorage(keys) {
  * @returns {Date}
  */
 export async function getUserLogInTime() {
-    let logTime = await getObjectFromLocalStorage('logInTime');
+    let { logTime } = await getObjectFromLocalStorage('logInTime');
     logTime = logTime === undefined ? "09:00" : logTime;
     const logInTimeInHours = Number.parseInt(logTime.split(':')[0]);
     const logInTimeInMinutes = Number.parseInt(logTime.split(':')[1]);
@@ -96,7 +56,7 @@ export async function getUserLogInTime() {
  * @returns {Date}
  */
 export async function getUserLogOutTime() {
-    let logOutTime = await getObjectFromLocalStorage('logOutTime');
+    let { logOutTime } = await getObjectFromLocalStorage('logOutTime');
     logOutTime = logOutTime === undefined ? "18:00" : logOutTime;
     const logOutTimeInHours = Number.parseInt(logOutTime.split(':')[0]);
     const logOutTimeInMinutes = Number.parseInt(logOutTime.split(':')[1]);
@@ -107,20 +67,14 @@ export async function getUserLogOutTime() {
  * @returns {object}
  */
 export async function getUserCredentials() {
-    return new Promise((resolve, reject) => {
-        try {
-            chrome.storage.sync.get(['huha', 'hahu'], function (value) {
-                resolve({ id: value.huha, password: value.hahu });
-            });
-        } catch (ex) {
-            reject(ex);
-        }
-    });
+    const { huha, hahu } = await getObjectFromLocalStorage(['huha', 'hahu']);
+    // const value = await getObjectFromLocalStorage(['huha', 'hahu']);
+    return { id: huha, password: hahu };
 }
 
 // Check if today is a holiday or weekend
 export async function isNonWorkingDay(date) {
-    const holidays = (await getObjectFromLocalStorage('holidays')) || [];
+    const { holidays } = (await getObjectFromLocalStorage('holidays')) || [];
     const today = date.toString().split('T')[0];
     return holidays.includes(today) || date.getDay() === 0 || date.getDay() === 6;
 };
