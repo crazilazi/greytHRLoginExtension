@@ -1,12 +1,19 @@
 // app/actions/backgroundProcessor.js
-import { getUserLogInTime, getUserLogOutTime, getUserCredentials, getObjectFromTemporaryStorage, getObjectFromLocalStorage } from './common.js';
+import {
+    getUserLogInTime,
+    getUserLogOutTime,
+    getUserCredentials,
+    getObjectFromLocalStorage,
+    saveObjectInLocalStorage,
+    removeObjectFromLocalStorage,
+    isNonWorkingDay
+} from './common.js';
 
 // Read MAIN_URL from manifest.json
 const MAIN_URL = chrome.runtime.getManifest().config.main_url;
 
 // Constants
 const MAX_ATTEMPTS = 3;
-const ONE_MINUTE_MS = 60000;
 const TEN_MINUTES_MS = 600000;
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -16,8 +23,6 @@ let greyThrTabId = 0;
 let loginAttempts = 0;
 let logoutAttempts = 0;
 let lastSignalFromFGP = null;
-let intervals = { retry: null };
-let timeouts = { login: null, logout: null, notify: null };
 
 // Signal constants
 const SIGNALS = {
@@ -26,12 +31,6 @@ const SIGNALS = {
     SIGN_IN: 'sign in',
     SIGN_OUT: 'sign out',
     RESET: 'reset'
-};
-
-// Utility to clear resources
-const clearResources = () => {
-    if (intervals.retry) clearInterval(intervals.retry);
-    Object.values(timeouts).forEach(clearTimeout);
 };
 
 // Notification helper
@@ -45,7 +44,7 @@ const notify = (title, message, buttons = []) => chrome.notifications.create({
 });
 
 // Create tab and send signal
-const createTab = async signal => {
+const createTab = async (signal) => {
     const tab = await chrome.tabs.create({ url: MAIN_URL, active: true });
     greyThrTabId = tab.id;
     return signal;
@@ -55,8 +54,8 @@ const createTab = async signal => {
 const handleMessage = async (request, sender) => {
     const { message, action } = request;
     if (action === SIGNALS.RESET) {
-        lastSignalFromFGP = null;
-        await bootstrap();
+        lastSignalFromFGP = SIGNALS.RESET;
+        await scheduleDay();
     } else if (action === SIGNALS.LOGGED_IN || action === SIGNALS.LOGGED_OUT) {
         lastSignalFromFGP = action;
         notify(`${action === SIGNALS.LOGGED_IN ? 'Login' : 'Logout'} Successful`, `You have been ${action} successfully.`);
@@ -81,66 +80,51 @@ chrome.tabs.onUpdated.addListener((tabId, { status }, tab) => {
         chrome.scripting.executeScript({
             target: { tabId },
             files: ['./app/actions/foregroundProcessor.js']
-        });
+        }).then(() => chrome.tabs.sendMessage(tabId, { action: SIGNALS.SIGN_IN }));
     }
 });
 
-// Check if today is a holiday or weekend
-const isNonWorkingDay = async date => {
-    const holidays = (await getObjectFromLocalStorage('holidays')) || [];
-    const today = date.toISOString().split('T')[0];
-    return holidays.includes(today) || date.getDay() === 0 || date.getDay() === 6;
-};
 
 // Retry logic for login/logout
 const attemptAction = async (signal, attempts, successSignal) => {
-    clearResources();
-    intervals.retry = setInterval(async () => {
-        if (attempts >= MAX_ATTEMPTS || lastSignalFromFGP === successSignal) {
-            clearInterval(intervals.retry);
-            attempts = 0;
-            if (signal === SIGNALS.SIGN_OUT && successSignal === lastSignalFromFGP) {
-                scheduleNextDay(); // Schedule next day only after successful logout
-            }
-        } else {
-            attempts++;
-            await createTab(signal);
+    if (attempts >= MAX_ATTEMPTS || lastSignalFromFGP === successSignal) {
+        if (signal === SIGNALS.SIGN_OUT && successSignal === lastSignalFromFGP) {
+            scheduleNextDay(); // Schedule next day only after successful logout
         }
-    }, ONE_MINUTE_MS);
-    return attempts;
+        return;
+    }
+    attempts++;
+    await createTab(signal);
 };
 
 // Schedule login/logout for a specific day
 const scheduleDay = async (baseDate = new Date()) => {
-    clearResources();
-    const loginTime = await getUserLogInTime();
-    const logoutTime = await getUserLogOutTime();
-    const today = new Date(baseDate.toDateString());
-    const loginDateTime = new Date(today.getTime() + loginTime.getTime() - loginTime.setHours(0, 0, 0, 0));
-    const logoutDateTime = new Date(today.getTime() + logoutTime.getTime() - logoutTime.setHours(0, 0, 0, 0));
-    const now = Date.now();
-
-    if (await isNonWorkingDay(today)) {
-        notify('Holiday/Weekend', 'No login/logout today.');
+    if (!(await getUserCredentials()).id) {
+        chrome.runtime.openOptionsPage();
         return;
     }
 
-    // if (loginDateTime > now && (!lastSignalFromFGP || lastSignalFromFGP !== SIGNALS.LOGGED_IN)) {
-    //     timeouts.login = setTimeout(() => {
-    //         loginAttempts = attemptAction(SIGNALS.SIGN_IN, loginAttempts, SIGNALS.LOGGED_IN);
-    //     }, loginDateTime - now);
-    // }
-    if (!lastSignalFromFGP || lastSignalFromFGP !== SIGNALS.LOGGED_IN) {
-        timeouts.login = setTimeout(() => {
-            loginAttempts = attemptAction(SIGNALS.SIGN_IN, loginAttempts, SIGNALS.LOGGED_IN);
-        }, loginDateTime - now);
+    const today = new Date(baseDate.toDateString());
+    if (await isNonWorkingDay(today)) {
+        notify('Holiday/Weekend', 'No login/logout today.');
+        await saveObjectInLocalStorage({ lastSignalFromFGP: SIGNALS.RESET });
+        return;
     }
 
-    if (logoutDateTime > now && (!lastSignalFromFGP || lastSignalFromFGP === SIGNALS.LOGGED_IN)) {
-        timeouts.logout = setTimeout(() => {
-            logoutAttempts = attemptAction(SIGNALS.SIGN_OUT, logoutAttempts, SIGNALS.LOGGED_OUT);
-        }, logoutDateTime - now);
-        timeouts.notify = setTimeout(() => promptExtension(logoutDateTime), Math.max(logoutDateTime - now - TEN_MINUTES_MS, 0));
+    const loginTime = await getUserLogInTime();
+    const logoutTime = await getUserLogOutTime();
+    const loginDateTime = new Date(today.getTime() + loginTime.getTime() - loginTime.setHours(0, 0, 0, 0));
+    const logoutDateTime = new Date(today.getTime() + logoutTime.getTime() - logoutTime.setHours(0, 0, 0, 0));
+
+    // Schedule login alarm
+    if (lastSignalFromFGP !== SIGNALS.LOGGED_IN) {
+        chrome.alarms.create('login', { when: loginDateTime.getTime() });
+    }
+
+    // Schedule logout alarm
+    if (lastSignalFromFGP !== SIGNALS.LOGGED_OUT) {
+        chrome.alarms.create('logout', { when: logoutDateTime.getTime() });
+        chrome.alarms.create('notify', { when: logoutDateTime.getTime() - TEN_MINUTES_MS });
     }
 };
 
@@ -150,54 +134,72 @@ const scheduleNextDay = () => {
     scheduleDay(tomorrow);
 };
 
+// Handle alarms
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name === 'login') {
+        loginAttempts = await attemptAction(SIGNALS.SIGN_IN, loginAttempts, SIGNALS.LOGGED_IN);
+    } else if (alarm.name === 'logout') {
+        logoutAttempts = await attemptAction(SIGNALS.SIGN_OUT, logoutAttempts, SIGNALS.LOGGED_OUT);
+    } else if (alarm.name === 'notify') {
+        const logoutTime = await getUserLogOutTime();
+        promptExtension(new Date(logoutTime));
+    }
+});
+
 // Prompt for session extension
-const promptExtension = async userLogOutTime => {
+const promptExtension = async (userLogOutTime) => {
     const id = await notify('Logout Reminder', 'Logout in 10 minutes. Extend session?', [
         { title: 'Extend by 30 minutes' },
         { title: 'Extend by 1 hour' }
     ]);
 
-    chrome.notifications.onButtonClicked.addListener(async (notifId, btnIdx) => {
-        if (notifId !== id) return;
+    chrome.notifications.onButtonClicked.addListener(async (notifyId, btnIdx) => {
+        if (notifyId !== id) return;
         const extensionMs = (btnIdx === 0 ? 30 : 60) * 60000;
         const newLogOutTime = new Date(userLogOutTime.getTime() + extensionMs);
-        clearResources();
-        timeouts.logout = setTimeout(() => {
-            logoutAttempts = attemptAction(SIGNALS.SIGN_OUT, logoutAttempts, SIGNALS.LOGGED_OUT);
-        }, newLogOutTime - Date.now());
+        chrome.alarms.create('logout', { when: newLogOutTime.getTime() });
         notify('Session Extended', `Extended by ${extensionMs / 60000} minutes.`);
         chrome.notifications.clear(id);
     });
 };
 
-// Core logic
-const bootstrap = async () => {
-    if (!(await getUserCredentials()).id) {
-        chrome.runtime.openOptionsPage();
+// Initialization
+const INITIALIZED_KEY = 'isInitialized';
+
+const init = async () => {
+    // Check if already initialized
+    const storedInitializedKey = await getObjectFromLocalStorage(INITIALIZED_KEY);
+    console.log(storedInitializedKey);
+    if (storedInitializedKey) {
+        console.log('Extension already initialized.');
         return;
     }
-    scheduleDay(); // Schedule current day
+
+    // Perform initialization
+    try {
+        await chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' });
+        lastSignalFromFGP = await getObjectFromLocalStorage("lastSignalFromFGP");
+        console.log('Background script loaded.', lastSignalFromFGP);
+        chrome.runtime.onMessage.addListener(handleMessage);
+        await scheduleDay();
+        // Mark as initialized
+        await saveObjectInLocalStorage({ INITIALIZED_KEY: true });
+    } catch (ex) {
+        console.error('Initialization failed.', ex);
+    }
 };
 
-// Periodic check for new day (low frequency)
-const startDailyCheck = () => {
-    setInterval(async () => {
-        const now = new Date();
-        const lastRun = new Date(await getObjectFromTemporaryStorage('lastScheduled') || 0);
-        if (now.toDateString() !== lastRun.toDateString()) {
-            await scheduleDay();
-            await chrome.storage.session.set({ lastScheduled: now.toISOString() });
-        }
-    }, ONE_HOUR_MS); // Check hourly to minimize memory usage
-};
+// Clear flag on extension install/update or browser startup
+chrome.runtime.onInstalled.addListener(async (details) => {
+    if (details.reason === 'install' || details.reason === 'update') {
+        await removeObjectFromLocalStorage(INITIALIZED_KEY);
+        console.log('Extension installed/updated. Initialization flag cleared.');
+    }
+});
 
-// Initialization
-const init = async () => {
-    await chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' });
-    chrome.runtime.onStartup.addListener(bootstrap);
-    chrome.runtime.onMessage.addListener(handleMessage);
-    startDailyCheck();
-    bootstrap();
-};
+chrome.runtime.onStartup.addListener(async () => {
+    await removeObjectFromLocalStorage(INITIALIZED_KEY);
+    console.log('Browser started. Initialization flag cleared.');
+});
 
 init();

@@ -117,3 +117,10 @@ export async function getUserCredentials() {
         }
     });
 }
+
+// Check if today is a holiday or weekend
+export async function isNonWorkingDay(date) {
+    const holidays = (await getObjectFromLocalStorage('holidays')) || [];
+    const today = date.toString().split('T')[0];
+    return holidays.includes(today) || date.getDay() === 0 || date.getDay() === 6;
+};

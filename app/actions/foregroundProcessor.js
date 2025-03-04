@@ -1,6 +1,6 @@
 (async () => {
     const src = chrome.runtime.getURL("/app/actions/common.js");
-    const { getUserCredentials, saveObjectInTemporaryStorage, getObjectFromTemporaryStorage, getObjectFromLocalStorage } = await import(src);
+    const { getUserCredentials, isNonWorkingDay, saveObjectInLocalStorage } = await import(src);
 
     // Read MAIN_URL from manifest.json
     const MAIN_URL = chrome.runtime.getManifest().config.main_url;
@@ -54,13 +54,6 @@
                 }
             }, POLL_INTERVAL_MS);
         });
-    };
-
-    // Check if today is a holiday or weekend
-    const isNonWorkingDay = async (date) => {
-        const holidays = (await getObjectFromLocalStorage('holidays')) || [];
-        const today = date.toISOString().split('T')[0];
-        return holidays.includes(today) || date.getDay() === 0 || date.getDay() === 6;
     };
 
     // Perform login
@@ -152,7 +145,7 @@
         const action = actions[buttonText]?.[lastSignalFromBGP];
         if (action) {
             const result = action();
-            await saveObjectInTemporaryStorage({ "lastSignalFromFGP": result });
+            await saveObjectInLocalStorage({ "lastSignalFromFGP": result });
             sendMessageToBackgroundProcessor(result, result);
         } else {
             sendMessageToBackgroundProcessor('No matching action for buttonText and signal: ' + buttonText + ', ' + lastSignalFromBGP);
