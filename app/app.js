@@ -1,15 +1,17 @@
-// app/app.js
 (async () => {
     const src = chrome.runtime.getURL("/app/actions/common.js");
-    const { getUserCredentials, getObjectFromLocalStorage, saveObjectInLocalStorage } = await import(src);
+    const { log, getObjectFromLocalStorage, saveObjectInLocalStorage } = await import(src);
+
+    log('App initialized', 'info');
+
     // Initialize Flatpickr for holidays
     const fpHolidays = flatpickr(document.querySelector('#holidays'), {
-        mode: 'multiple', // Allow multiple date selections
-        dateFormat: 'Y-m-d', // Format as YYYY-MM-DD
-        defaultDate: [], // No default dates
-        inline: true, // Show calendar inline
+        mode: 'multiple',
+        dateFormat: 'Y-m-d',
+        defaultDate: [],
+        inline: true,
         onChange: function (selectedDates, dateStr, instance) {
-            console.log('Selected holidays:', dateStr);
+            log(`Selected holidays: ${dateStr}`, 'info');
         }
     });
 
@@ -21,31 +23,24 @@
         const huha = document.getElementById('huha').value;
         const hahu = document.getElementById('hahu').value;
         const holidays = fpHolidays.selectedDates.map(date => {
-            // Format the date manually to avoid timezone issues
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
             const day = String(date.getDate()).padStart(2, '0');
             return `${year}-${month}-${day}`;
         });
 
-        await saveObjectInLocalStorage({ 'logInTime': logInTime, 'logOutTime': logOutTime, 'hahu': hahu, 'huha': huha, 'holidays': holidays });
-        console.log("Setting logIn and logOut time.", { 'logInTime': logInTime, 'logOutTime': logOutTime });
-        chrome.runtime.sendMessage({ action: 'reset' });
+        await saveObjectInLocalStorage({ logInTime, logOutTime, huha, hahu, holidays });
+        log('Saved user settings to local storage', 'info');
+
+        chrome.runtime.sendMessage({ action: 'reset' }, (response) => {
+            if (chrome.runtime.lastError) {
+                log(`Error sending message: ${chrome.runtime.lastError.message}`, 'error');
+            } else {
+                log('Message sent successfully', 'info');
+            }
+        });
         alert("Your log in and log out time is set.");
     });
-
-    // Load saved holidays when the page loads
-    const { holidays } = await getObjectFromLocalStorage(['holidays'])
-    fpHolidays.setDate(holidays);
-
-    const result = await getObjectFromLocalStorage(['logInTime', 'logOutTime', 'huha', 'hahu', 'holidays']);
-
-    if (result.logInTime) document.getElementById('loginTime').value = result.logInTime;
-    if (result.logOutTime) document.getElementById('logOutTime').value = result.logOutTime;
-    if (result.huha) document.getElementById('huha').value = result.huha;
-    if (result.hahu) document.getElementById('hahu').value = result.hahu;
-    if (result.holidays) document.getElementById('holidays').value = result.holidays.join(', ');
-
     const fpLogIn = flatpickr(document.querySelector('#loginTime'), {
         enableTime: true,
         noCalendar: true,
@@ -61,4 +56,15 @@
         time_24hr: true,
         defaultDate: "18:00"
     });
+    const result = await getObjectFromLocalStorage(['logInTime', 'logOutTime', 'huha', 'hahu', 'holidays']);
+    log('Retrieved user settings from local storage', 'debug');
+    console.log('result', result);
+    if (result.logInTime) document.getElementById('loginTime').value = result.logInTime;
+    if (result.logOutTime) document.getElementById('logOutTime').value = result.logOutTime;
+    if (result.huha) document.getElementById('huha').value = result.huha;
+    if (result.hahu) document.getElementById('hahu').value = result.hahu;
+    if (result.holidays) {
+        document.getElementById('holidays').value = result.holidays.join(', ');
+        fpHolidays.setDate(result.holidays);
+    }
 })();

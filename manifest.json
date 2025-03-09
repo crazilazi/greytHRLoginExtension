@@ -43,7 +43,8 @@
     "scripting",
     "alarms",
     "webNavigation",
-    "notifications"
+    "notifications",
+    "management"
   ],
   "host_permissions": [
     "<all_urls>"
