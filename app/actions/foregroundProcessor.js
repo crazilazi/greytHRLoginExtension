@@ -8,27 +8,37 @@
     const APP_HOME_PATH = '/v3/portal/ess/home';
 
     // Constants
-    const SIGNALS = {
+    const SIGNALS = Object.freeze({
         SIGN_OUT: 'sign out',
         SIGN_IN: 'sign in',
         LOGGED_IN: 'logged in',
         LOGGED_OUT: 'logged out'
-    };
-    const POLL_INTERVAL_MS = 1000;
-    const MAX_POLL_ATTEMPTS = 30; // 30 seconds max polling
+    });
+    const TIMEOUT_MS = 30000;
 
     // State
     let lastSignalFromBGP = null;
-    let activeInterval = null;
+    let isProcessing = false; // Flag to prevent duplicate processing
 
     log('Foreground script initialization.');
+
+    // Centralized error handler
+    const handleError = (message, level = 'error', notifyBackground = false) => {
+        log(message, level);
+        if (notifyBackground) {
+            sendMessageToBackgroundProcessor(message, 'close the tab');
+        }
+    };
+
     // Common method for sending messages to the background
     const sendMessageToBackgroundProcessor = async (message, action = "close the tab") => {
-        // Save message and sender information to storage
-        // await saveObjectInLocalStorage({ message, action });
-        const packet = { message, action };
-        chrome.runtime.sendMessage(packet);
-        log(`Data saved to storage: ${message}, action: ${action}`);
+        try {
+            const packet = { message, action };
+            chrome.runtime.sendMessage(packet);
+            log(`Message sent to background: ${message}, action: ${action}`);
+        } catch (error) {
+            log(`Failed to send message to background: ${error.message}`, 'error');
+        }
     };
 
     // Message listener
@@ -36,155 +46,212 @@
         const { action } = request;
         log(`Received message from background: ${action}`);
         if (action === SIGNALS.SIGN_IN || action === SIGNALS.SIGN_OUT) {
+            if (isProcessing) {
+                log(`Already processing a signal (${lastSignalFromBGP}), ignoring duplicate: ${action}`);
+                return;
+            }
             lastSignalFromBGP = action;
             log(`Last signal from BGP: ${lastSignalFromBGP}`);
             bootstrap();
         }
     };
 
+    // Ensure listener is only added once
+    chrome.runtime.onMessage.removeListener(handleMessage); // Remove any existing listener
     chrome.runtime.onMessage.addListener(handleMessage);
 
-    // Utility to wait for an element with timeout
-    const waitForElement = (selector, maxAttempts = MAX_POLL_ATTEMPTS) => {
+    // Utility to wait for an element using MutationObserver
+    const waitForElement = (selector, timeoutMs = TIMEOUT_MS) => {
         return new Promise((resolve, reject) => {
-            let attempts = 0;
-            activeInterval = setInterval(() => {
+            const element = document.querySelector(selector);
+            if (element) return resolve(element);
+
+            const observer = new MutationObserver(() => {
                 const element = document.querySelector(selector);
                 if (element) {
-                    clearInterval(activeInterval);
-                    activeInterval = null;
+                    observer.disconnect();
                     resolve(element);
-                } else if (++attempts >= maxAttempts) {
-                    clearInterval(activeInterval);
-                    activeInterval = null;
-                    reject(new Error(`Element ${selector} not found after ${maxAttempts} attempts`));
                 }
-            }, POLL_INTERVAL_MS);
+            });
+
+            observer.observe(document.body, { childList: true, subtree: true });
+
+            setTimeout(() => {
+                observer.disconnect();
+                reject(new Error(`Element ${selector} not found after ${timeoutMs}ms`));
+            }, timeoutMs);
+        });
+    };
+
+    // Optimized utility to wait for shadow DOM content
+    const waitForShadowContent = (element, timeoutMs = TIMEOUT_MS) => {
+        return new Promise((resolve, reject) => {
+            log(`Waiting for shadow DOM content for element: ${element.tagName}`);
+
+            const findTextContent = (root) => {
+                if (!root) return null;
+                for (const node of root.childNodes) {
+                    if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+                        return node.textContent.trim().toLowerCase();
+                    }
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        if (node.shadowRoot) {
+                            const text = findTextContent(node.shadowRoot);
+                            if (text) return text;
+                        }
+                        const text = findTextContent(node);
+                        if (text) return text;
+                    }
+                }
+                return null;
+            };
+
+            if (element.shadowRoot) {
+                const text = findTextContent(element.shadowRoot);
+                if (text) {
+                    log(`Shadow DOM content found immediately: ${text}`);
+                    return resolve(text);
+                }
+            }
+
+            const observer = new MutationObserver(() => {
+                if (element.shadowRoot) {
+                    const text = findTextContent(element.shadowRoot);
+                    if (text) {
+                        log(`Shadow DOM content found via observer: ${text}`);
+                        observer.disconnect();
+                        resolve(text);
+                    }
+                }
+            });
+
+            observer.observe(element, { childList: true, subtree: true, characterData: true });
+            if (element.shadowRoot) {
+                observer.observe(element.shadowRoot, { childList: true, subtree: true, characterData: true });
+            }
+
+            setTimeout(() => {
+                log('Shadow DOM content not found within timeout');
+                observer.disconnect();
+                reject(new Error('Shadow DOM content not found after timeout'));
+            }, timeoutMs);
         });
     };
 
     // Perform login
     const doLogin = async () => {
-        log('I am at login page');
-        const user = await getUserCredentials();
-        const { id: userId, password } = user;
-
-        let loginBtn;
+        log('At login page');
         try {
-            loginBtn = await waitForElement('form button');
-            log(`Found login button: ${loginBtn}`);
-        } catch (error) {
-            sendMessageToBackgroundProcessor(`Login button not found: ${error}`, 'error');
-            return;
-        }
+            if (window.location.origin !== new URL(MAIN_URL).origin) {
+                throw new Error('Invalid origin, aborting login');
+            }
 
-        const event = new Event('input', { bubbles: true });
-        const usernameField = document.getElementById('username');
-        const passwordField = document.getElementById('password');
-        if (usernameField && passwordField) {
-            usernameField.value = userId;
-            usernameField.dispatchEvent(event);
-            passwordField.value = password;
-            passwordField.dispatchEvent(event);
-            log('**********************Login to greytHR**********************');
-            loginBtn.click();
-        } else {
-            sendMessageToBackgroundProcessor('Username or password field missing', 'error');
+            const user = await getUserCredentials();
+            const { id: userId, password } = user;
+
+            const loginBtn = await waitForElement('form button');
+            log(`Found login button: ${loginBtn}`);
+
+            const usernameField = document.getElementById('username');
+            const passwordField = document.getElementById('password');
+            if (usernameField && passwordField) {
+                const event = new Event('input', { bubbles: true });
+                usernameField.value = userId;
+                usernameField.dispatchEvent(event);
+                passwordField.value = password;
+                passwordField.dispatchEvent(event);
+                log('Attempting login to greytHR');
+                loginBtn.click();
+            } else {
+                throw new Error('Username or password field missing');
+            }
+        } catch (error) {
+            handleError(`Login failed: ${error.message}`, 'error', true);
+        } finally {
+            isProcessing = false; // Reset flag
         }
     };
 
     // Handle sign in or sign out
     const doSignInOrOut = async () => {
-        let button;
         try {
-            button = await waitForElement('.gt-widget-wrapper.bg-white.rounded-m.border-secondary-200.hover\\:shadow-lg.ng-star-inserted:nth-child(3) gt-button');
+            if (window.location.origin !== new URL(MAIN_URL).origin) {
+                throw new Error('Invalid origin, aborting sign in/out');
+            }
+
+            const button = await waitForElement('.gt-widget-wrapper.bg-white.rounded-m.border-secondary-200.hover\\:shadow-lg.ng-star-inserted:nth-child(3) gt-button');
             log(`Found sign in/out button: ${button}`);
-        } catch (error) {
-            sendMessageToBackgroundProcessor(`Sign in/out button not found: ${error}`, 'error');
-            return;
-        }
 
-        let buttonText;
-        try {
-            // Wait for shadowRoot and its child nodes to be ready
-            log('Waiting for shadowRoot and innerText to be ready');
-            const shadowReady = await new Promise((resolve, reject) => {
-                let attempts = 0;
-                log(`Checking shadowRoot attempt:${attempts}, max attempts: ${MAX_POLL_ATTEMPTS}`);
-                const checkShadow = setInterval(() => {
-                    log('Checking shadowRoot and innerText');
-                    if (button.shadowRoot && button.shadowRoot.childNodes[0] && button.shadowRoot.childNodes[0].innerText) {
-                        clearInterval(checkShadow);
-                        resolve(true);
-                        log('Shadow DOM ready');
-                    } else if (++attempts >= MAX_POLL_ATTEMPTS) {
-                        clearInterval(checkShadow);
-                        reject(new Error('Shadow DOM not ready'));
-                        log('Shadow DOM not ready', 'error');
-                    }
-                }, POLL_INTERVAL_MS);
-            });
+            const buttonText = await waitForShadowContent(button);
+            log(`Button text: ${buttonText}`);
 
-            if (shadowReady) {
-                buttonText = button.shadowRoot.childNodes[0].innerText.trim().toLowerCase();
-                log(`Button text: ${buttonText}`);
+            const actions = {
+                [SIGNALS.SIGN_OUT]: {
+                    [SIGNALS.SIGN_OUT]: () => {
+                        button.click();
+                        return SIGNALS.LOGGED_OUT;
+                    },
+                    [SIGNALS.SIGN_IN]: () => SIGNALS.LOGGED_IN
+                },
+                [SIGNALS.SIGN_IN]: {
+                    [SIGNALS.SIGN_IN]: () => {
+                        button.click();
+                        return SIGNALS.LOGGED_IN;
+                    },
+                    [SIGNALS.SIGN_OUT]: () => SIGNALS.LOGGED_OUT
+                }
+            };
+
+            const action = actions[buttonText]?.[lastSignalFromBGP];
+            if (action) {
+                const result = action();
+                await saveObjectInLocalStorage({ lastSignalFromFGP: result });
+                sendMessageToBackgroundProcessor(result, result);
+            } else {
+                throw new Error(`No matching action for buttonText and signal: ${buttonText}, ${lastSignalFromBGP}`);
             }
         } catch (error) {
-            sendMessageToBackgroundProcessor(`Failed to access shadowRoot or innerText: ${error}`, 'error');
-            return;
-        }
-
-        log(`Last signal from BGP: ${lastSignalFromBGP}`);
-
-        const actions = {
-            [SIGNALS.SIGN_OUT]: {
-                [SIGNALS.SIGN_OUT]: () => {
-                    button.click();
-                    return SIGNALS.LOGGED_OUT;
-                },
-                [SIGNALS.SIGN_IN]: () => SIGNALS.LOGGED_IN
-            },
-            [SIGNALS.SIGN_IN]: {
-                [SIGNALS.SIGN_IN]: () => {
-                    button.click();
-                    return SIGNALS.LOGGED_IN;
-                },
-                [SIGNALS.SIGN_OUT]: () => SIGNALS.LOGGED_OUT
-            }
-        };
-
-        const action = actions[buttonText]?.[lastSignalFromBGP];
-        if (action) {
-            const result = action();
-            await saveObjectInLocalStorage({ "lastSignalFromFGP": result });
-            sendMessageToBackgroundProcessor(result, result);
-        } else {
-            sendMessageToBackgroundProcessor(`No matching action for buttonText and signal: ${buttonText}, ${lastSignalFromBGP}`, 'error');
+            handleError(`Sign in/out failed: ${error.message}`, 'error', true);
+        } finally {
+            isProcessing = false; // Reset flag
         }
     };
 
     // Main logic
     const bootstrap = async () => {
-        const today = new Date();
-        if (await isNonWorkingDay(today)) {
-            log('Today is a holiday or weekend; no actions will be performed.');
-            sendMessageToBackgroundProcessor("Today is a holiday or weekend; no actions will be performed.", "close the tab");
+        if (isProcessing) {
+            log('Already processing a signal, skipping bootstrap');
             return;
         }
+        isProcessing = true;
+        try {
+            const today = new Date();
+            if (await isNonWorkingDay(today)) {
+                log('Today is a holiday or weekend; no actions will be performed.');
+                sendMessageToBackgroundProcessor("Today is a holiday or weekend; no actions will be performed.", "close the tab");
+                return;
+            }
 
-        log('**********************Starting bootstrap**********************');
-        const { pathname } = window.location;
-        if (pathname === LOGIN_PATH) {
-            await doLogin();
-        } else if (pathname === APP_HOME_PATH) {
-            await doSignInOrOut();
+            log('Starting bootstrap');
+            const { pathname } = window.location;
+            if (pathname === LOGIN_PATH) {
+                await doLogin();
+            } else if (pathname === APP_HOME_PATH) {
+                await doSignInOrOut();
+            }
+        } catch (error) {
+            handleError(`Bootstrap failed: ${error.message}`, 'error', true);
+        } finally {
+            isProcessing = false; // Ensure flag is reset even on error
         }
     };
 
-    window.addEventListener('unload', () => {
-        // if (activeInterval) clearInterval(activeInterval);
+    // Clean up on unload
+    const unloadHandler = () => {
         chrome.runtime.onMessage.removeListener(handleMessage);
-    }, { once: true });
+        window.removeEventListener('unload', unloadHandler);
+    };
+    window.addEventListener('unload', unloadHandler, { once: true });
 
     log('Foreground script loaded and initialized.');
 })();

@@ -26,7 +26,7 @@ const log = (message, level = 'info') => {
 export async function getObjectFromLocalStorage(key) {
     try {
         const result = await chrome.storage.local.get(key);
-        log(`Retrieved data from local storage for key: ${key} ${JSON.stringify(result)}`, 'debug');
+        log(`Retrieved data from local storage for key: ${key}`, 'debug');
         return result;
     } catch (error) {
         log(`Error retrieving data from local storage for key: ${key}`, 'error');
