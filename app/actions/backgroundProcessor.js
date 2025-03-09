@@ -1,13 +1,8 @@
 // app/actions/backgroundProcessor.js
 import {
-    getUserLogInTime,
-    getUserLogOutTime,
-    getUserCredentials,
-    getObjectFromLocalStorage,
-    saveObjectInLocalStorage,
-    removeObjectFromLocalStorage,
-    isNonWorkingDay,
-    log
+    getUserLogInTime, getUserLogOutTime, getUserCredentials,
+    getObjectFromLocalStorage, saveObjectInLocalStorage, removeObjectFromLocalStorage,
+    isNonWorkingDay, log, isNotificationsEnabled, isAutoLoginOnStartupEnabled, getSessionExtensionTime
 } from './common.js';
 
 // Read MAIN_URL from manifest.json
@@ -43,29 +38,31 @@ const constants = Object.freeze({
 });
 
 // Centralized error handler
-const handleError = (message, level = 'error', notifyUser = false) => {
+const handleError = async (message, level = 'error', notifyUser = false) => {
     log(message, level);
-    // if (notifyUser) {
-    //     chrome.notifications.create({
-    //         type: 'basic',
-    //         iconUrl: '/app/styles/icons/48.png',
-    //         title: level.charAt(0).toUpperCase() + level.slice(1),
-    //         message,
-    //         priority: 1
-    //     });
-    // }
+    if (notifyUser && await isNotificationsEnabled()) {
+        chrome.notifications.create({
+            type: 'basic',
+            iconUrl: '/app/styles/icons/48.png',
+            title: level.charAt(0).toUpperCase() + level.slice(1),
+            message,
+            priority: 1
+        });
+    }
 };
 
 // Notification helper
-const notify = (title, message, buttons = []) => {
-    return chrome.notifications.create({
-        type: 'basic',
-        iconUrl: '/app/styles/icons/48.png',
-        title,
-        message,
-        buttons,
-        priority: 2
-    });
+const notify = async (title, message, buttons = []) => {
+    if (await isNotificationsEnabled()) {
+        return chrome.notifications.create({
+            type: 'basic',
+            iconUrl: '/app/styles/icons/48.png',
+            title,
+            message,
+            buttons,
+            priority: 2
+        });
+    }
 };
 
 // Create tab and send signal
@@ -312,10 +309,13 @@ const init = async () => {
 
 // Event listeners
 chrome.runtime.onStartup.addListener(async () => {
-    log('Browser started, checking for missed alarms.');
-    const alarms = await chrome.alarms.getAll();
-    if (!alarms.length) {
-        await scheduleDay();
+    const autoLoginOnStartup = await isAutoLoginOnStartupEnabled();
+    if (autoLoginOnStartup) {
+        log('Browser started, checking for missed alarms.');
+        const alarms = await chrome.alarms.getAll();
+        if (!alarms.length) {
+            await scheduleDay();
+        }
     }
 });
 
