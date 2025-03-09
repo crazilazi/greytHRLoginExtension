@@ -1,6 +1,6 @@
 (async () => {
     const src = chrome.runtime.getURL("/app/actions/common.js");
-    const { getUserCredentials, isNonWorkingDay, saveObjectInLocalStorage } = await import(src);
+    const { getUserCredentials, isNonWorkingDay, saveObjectInLocalStorage, log } = await import(src);
 
     // Read MAIN_URL from manifest.json
     const MAIN_URL = chrome.runtime.getManifest().config.main_url;
@@ -21,20 +21,27 @@
     let lastSignalFromBGP = null;
     let activeInterval = null;
 
+    log('Foreground script initialization.');
     // Common method for sending messages to the background
-    const sendMessageToBackgroundProcessor = (message, action = "close the tab") => {
-        chrome.runtime.sendMessage({ message: message, action: action });
+    const sendMessageToBackgroundProcessor = async (message, action = "close the tab") => {
+        // Save message and sender information to storage
+        // await saveObjectInLocalStorage({ message, action });
+        const packet = { message, action };
+        chrome.runtime.sendMessage(packet);
+        log(`Data saved to storage: ${message}, action: ${action}`);
     };
 
     // Message listener
     const handleMessage = (request) => {
         const { action } = request;
+        log(`Received message from background: ${action}`);
         if (action === SIGNALS.SIGN_IN || action === SIGNALS.SIGN_OUT) {
             lastSignalFromBGP = action;
-            console.log("last signal from BGP", lastSignalFromBGP);
+            log(`Last signal from BGP: ${lastSignalFromBGP}`);
             bootstrap();
         }
     };
+
     chrome.runtime.onMessage.addListener(handleMessage);
 
     // Utility to wait for an element with timeout
@@ -58,16 +65,16 @@
 
     // Perform login
     const doLogin = async () => {
-        console.log('I am at login page');
+        log('I am at login page');
         const user = await getUserCredentials();
         const { id: userId, password } = user;
 
         let loginBtn;
         try {
             loginBtn = await waitForElement('form button');
-            console.log('Found login button', loginBtn);
+            log(`Found login button: ${loginBtn}`);
         } catch (error) {
-            sendMessageToBackgroundProcessor('Login button not found: ' + error);
+            sendMessageToBackgroundProcessor(`Login button not found: ${error}`, 'error');
             return;
         }
 
@@ -79,10 +86,10 @@
             usernameField.dispatchEvent(event);
             passwordField.value = password;
             passwordField.dispatchEvent(event);
-            console.log('**********************Login to greytHR**********************');
+            log('**********************Login to greytHR**********************');
             loginBtn.click();
         } else {
-            sendMessageToBackgroundProcessor('Username or password field missing');
+            sendMessageToBackgroundProcessor('Username or password field missing', 'error');
         }
     };
 
@@ -91,39 +98,43 @@
         let button;
         try {
             button = await waitForElement('.gt-widget-wrapper.bg-white.rounded-m.border-secondary-200.hover\\:shadow-lg.ng-star-inserted:nth-child(3) gt-button');
-            console.log('Found sign in/out button', button);
+            log(`Found sign in/out button: ${button}`);
         } catch (error) {
-            sendMessageToBackgroundProcessor('Sign in/out button not found: ' + error);
+            sendMessageToBackgroundProcessor(`Sign in/out button not found: ${error}`, 'error');
             return;
         }
 
         let buttonText;
         try {
             // Wait for shadowRoot and its child nodes to be ready
+            log('Waiting for shadowRoot and innerText to be ready');
             const shadowReady = await new Promise((resolve, reject) => {
                 let attempts = 0;
+                log(`Checking shadowRoot attempt:${attempts}, max attempts: ${MAX_POLL_ATTEMPTS}`);
                 const checkShadow = setInterval(() => {
+                    log('Checking shadowRoot and innerText');
                     if (button.shadowRoot && button.shadowRoot.childNodes[0] && button.shadowRoot.childNodes[0].innerText) {
                         clearInterval(checkShadow);
                         resolve(true);
+                        log('Shadow DOM ready');
                     } else if (++attempts >= MAX_POLL_ATTEMPTS) {
                         clearInterval(checkShadow);
                         reject(new Error('Shadow DOM not ready'));
+                        log('Shadow DOM not ready', 'error');
                     }
                 }, POLL_INTERVAL_MS);
-                activeInterval = checkShadow; // Track this interval
             });
 
             if (shadowReady) {
                 buttonText = button.shadowRoot.childNodes[0].innerText.trim().toLowerCase();
-                console.log("Button text:", buttonText);
+                log(`Button text: ${buttonText}`);
             }
         } catch (error) {
-            sendMessageToBackgroundProcessor('Failed to access shadowRoot or innerText: ' + error);
+            sendMessageToBackgroundProcessor(`Failed to access shadowRoot or innerText: ${error}`, 'error');
             return;
         }
 
-        console.log("last signal from BGP", lastSignalFromBGP);
+        log(`Last signal from BGP: ${lastSignalFromBGP}`);
 
         const actions = {
             [SIGNALS.SIGN_OUT]: {
@@ -148,7 +159,7 @@
             await saveObjectInLocalStorage({ "lastSignalFromFGP": result });
             sendMessageToBackgroundProcessor(result, result);
         } else {
-            sendMessageToBackgroundProcessor('No matching action for buttonText and signal: ' + buttonText + ', ' + lastSignalFromBGP);
+            sendMessageToBackgroundProcessor(`No matching action for buttonText and signal: ${buttonText}, ${lastSignalFromBGP}`, 'error');
         }
     };
 
@@ -156,12 +167,12 @@
     const bootstrap = async () => {
         const today = new Date();
         if (await isNonWorkingDay(today)) {
-            console.log('Today is a holiday or weekend; no actions will be performed.');
+            log('Today is a holiday or weekend; no actions will be performed.');
             sendMessageToBackgroundProcessor("Today is a holiday or weekend; no actions will be performed.", "close the tab");
             return;
         }
 
-        console.log('**********************What the hack**********************');
+        log('**********************Starting bootstrap**********************');
         const { pathname } = window.location;
         if (pathname === LOGIN_PATH) {
             await doLogin();
@@ -170,17 +181,10 @@
         }
     };
 
-    // Run and cleanup
-    // try {
-    //     await bootstrap();
-    // } finally {
-    //     window.addEventListener('unload', () => {
-    //         if (activeInterval) clearInterval(activeInterval);
-    //         chrome.runtime.onMessage.removeListener(handleMessage);
-    //     }, { once: true });
-    // }
     window.addEventListener('unload', () => {
-        if (activeInterval) clearInterval(activeInterval);
+        // if (activeInterval) clearInterval(activeInterval);
         chrome.runtime.onMessage.removeListener(handleMessage);
     }, { once: true });
+
+    log('Foreground script loaded and initialized.');
 })();
