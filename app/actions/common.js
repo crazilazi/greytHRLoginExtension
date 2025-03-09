@@ -1,5 +1,23 @@
+
+// Check if notifications are enabled
+export async function isNotificationsEnabled() {
+    let { enableNotifications } = await getObjectFromLocalStorage('enableNotifications');
+    enableNotifications = enableNotifications === undefined ? false : enableNotifications;
+    return enableNotifications; // Default to true if not set
+}
+
+// Check if logging is enabled
+export async function isLoggingEnabled() {
+    let { enableLogging } = await getObjectFromLocalStorage('enableLogging');
+    enableLogging = enableLogging === undefined ? false : enableLogging;
+    return enableLogging; // Default to true if not set
+}
+
 // Logging helper (console-only)
-const log = (message, level = 'info') => {
+const log = async (message, level = 'info') => {
+    let { enableLogging } = await chrome.storage.local.get('enableLogging');
+    enableLogging = enableLogging === undefined ? false : enableLogging;
+    if (!enableLogging) return;
     const timestamp = new Date().toString();
     const logEntry = `[${timestamp}] [${level.toUpperCase()}] ${message}`;
 
@@ -128,6 +146,19 @@ export async function isNonWorkingDay(date) {
     const isHoliday = holidays.includes(today) || date.getDay() === 0 || date.getDay() === 6;
     log(`Checked if today is a non-working day: ${isHoliday}`, 'debug');
     return isHoliday;
+}
+
+// Check if auto-login on startup is enabled
+export async function isAutoLoginOnStartupEnabled() {
+    const { autoLoginOnStartup } = await getObjectFromLocalStorage('autoLoginOnStartup');
+    return autoLoginOnStartup === true; // Default to false if not set
+}
+
+// Get session extension time in milliseconds
+export async function getSessionExtensionTime() {
+    const { sessionExtensionTime } = await getObjectFromLocalStorage('sessionExtensionTime');
+    const extensionTime = sessionExtensionTime || 30; // Default to 30 minutes if not set
+    return extensionTime * 60000; // Convert minutes to milliseconds
 }
 
 // Export the log function for use in other files
