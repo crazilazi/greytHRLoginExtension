@@ -60,6 +60,15 @@
     chrome.runtime.onMessage.removeListener(handleMessage); // Remove any existing listener
     chrome.runtime.onMessage.addListener(handleMessage);
 
+    // Cleanup function for foreground script
+    const cleanupForegroundResources = () => {
+        if (window.foregroundTimeouts) {
+            window.foregroundTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+            window.foregroundTimeouts = [];
+            log('Cleared foreground timeouts.');
+        }
+    };
+
     // Utility to wait for an element using MutationObserver
     const waitForElement = (selector, timeoutMs = TIMEOUT_MS) => {
         return new Promise((resolve, reject) => {
@@ -76,10 +85,14 @@
 
             observer.observe(document.body, { childList: true, subtree: true });
 
-            setTimeout(() => {
+            const timeoutId = setTimeout(() => {
                 observer.disconnect();
                 reject(new Error(`Element ${selector} not found after ${timeoutMs}ms`));
             }, timeoutMs);
+
+            // Store the timeout ID for cleanup
+            if (!window.foregroundTimeouts) window.foregroundTimeouts = [];
+            window.foregroundTimeouts.push(timeoutId);
         });
     };
 
@@ -130,11 +143,15 @@
                 observer.observe(element.shadowRoot, { childList: true, subtree: true, characterData: true });
             }
 
-            setTimeout(() => {
+            const timeoutId = setTimeout(() => {
                 log('Shadow DOM content not found within timeout');
                 observer.disconnect();
                 reject(new Error('Shadow DOM content not found after timeout'));
             }, timeoutMs);
+
+            // Store the timeout ID for cleanup
+            if (!window.foregroundTimeouts) window.foregroundTimeouts = [];
+            window.foregroundTimeouts.push(timeoutId);
         });
     };
 
@@ -248,6 +265,7 @@
 
     // Clean up on unload
     const unloadHandler = () => {
+        cleanupForegroundResources();
         chrome.runtime.onMessage.removeListener(handleMessage);
         window.removeEventListener('unload', unloadHandler);
     };

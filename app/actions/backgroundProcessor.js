@@ -65,6 +65,7 @@ const notify = async (title, message, buttons = []) => {
     }
 };
 
+let injectForegroundScriptTimeoutId;
 // Create tab and send signal
 const createTab = async (signal) => {
     try {
@@ -79,7 +80,15 @@ const createTab = async (signal) => {
 
         const loadListener = (tabId, changeInfo) => {
             if (tabId === greyThrTabId && changeInfo.status === 'complete') {
-                injectForegroundScript(tabId, currentSignal);
+                if (injectForegroundScriptTimeoutId) clearTimeout(injectForegroundScriptTimeoutId);
+                injectForegroundScriptTimeoutId = setTimeout(() => {
+                    injectForegroundScript(tabId, currentSignal);
+                }, 4000);
+
+                // Store the timeoutId in timeoutMap
+                const currentTimeouts = timeoutMap.get(tabId) || [];
+                currentTimeouts.push(injectForegroundScriptTimeoutId);
+                timeoutMap.set(tabId, currentTimeouts);
             }
         };
 
@@ -138,6 +147,7 @@ const cleanupTabResources = (tabId) => {
     }
 };
 
+let messageTimeoutId;
 // Ensure foreground script injection
 const injectForegroundScript = async (tabId, signal) => {
     log(`Injecting script for tab: ${tabId} signal: ${signal}`);
@@ -147,15 +157,16 @@ const injectForegroundScript = async (tabId, signal) => {
             files: ['./app/actions/foregroundProcessor.js']
         });
 
-        const timeoutId = setTimeout(() => {
+        if (messageTimeoutId) clearTimeout(messageTimeoutId);
+
+        messageTimeoutId = setTimeout(() => {
             chrome.tabs.sendMessage(tabId, { action: signal }, (response) => {
                 if (chrome.runtime.lastError) {
                     handleError(`Error sending message: ${chrome.runtime.lastError.message}`, 'error');
                 } else {
-                    log('Message sent successfully', 'info');
+                    log(`Message sent to tabId ${tabId} successfully`, 'info');
                 }
             });
-            log(`Script injected successfully for signal: ${signal}`);
             const activateTimeoutId = setTimeout(() => {
                 chrome.tabs.update(tabId, { active: true });
                 log(`Updated tab: ${tabId} to active mode`);
@@ -165,11 +176,12 @@ const injectForegroundScript = async (tabId, signal) => {
             const currentTimeouts = timeoutMap.get(tabId) || [];
             currentTimeouts.push(activateTimeoutId);
             timeoutMap.set(tabId, currentTimeouts);
-        }, 1000);
+            log(`Script injected successfully for signal: ${signal}`);
+        }, 2000);
 
         // Store the timeoutId in timeoutMap
         const currentTimeouts = timeoutMap.get(tabId) || [];
-        currentTimeouts.push(timeoutId);
+        currentTimeouts.push(messageTimeoutId);
         timeoutMap.set(tabId, currentTimeouts);
     } catch (error) {
         handleError(`Script injection failed: ${error.message}`, 'error', true);
