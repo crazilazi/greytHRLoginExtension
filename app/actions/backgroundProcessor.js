@@ -52,7 +52,7 @@ const handleError = async (message, level = 'error', notifyUser = false) => {
 };
 
 // Notification helper
-const notify = async (title, message, buttons = []) => {
+const notify = async (title, message, buttons = [], requireInteraction = false) => {
     if (await isNotificationsEnabled()) {
         return chrome.notifications.create({
             type: 'basic',
@@ -60,7 +60,8 @@ const notify = async (title, message, buttons = []) => {
             title,
             message,
             buttons,
-            priority: 2
+            priority: 2,
+            requireInteraction
         });
     }
 };
@@ -83,7 +84,7 @@ const createTab = async (signal) => {
                 if (injectForegroundScriptTimeoutId) clearTimeout(injectForegroundScriptTimeoutId);
                 injectForegroundScriptTimeoutId = setTimeout(() => {
                     injectForegroundScript(tabId, currentSignal);
-                }, 4000);
+                }, 10000);
 
                 // Store the timeoutId in timeoutMap
                 const currentTimeouts = timeoutMap.get(tabId) || [];
@@ -168,8 +169,18 @@ const injectForegroundScript = async (tabId, signal) => {
                 }
             });
             const activateTimeoutId = setTimeout(() => {
-                chrome.tabs.update(tabId, { active: true });
-                log(`Updated tab: ${tabId} to active mode`);
+                // Maximize and focus the current window
+                chrome.windows.getCurrent({}, (window) => {
+                    chrome.windows.update(window.id, {
+                        state: "maximized",
+                        focused: true
+                    }).then(() => {
+                        log(`Maximized and focused window: ${window.id}`);
+                        chrome.tabs.update(tabId, { active: true }).then(() => {
+                            log(`Updated tab: ${tabId} to active mode`);
+                        });
+                    });
+                });
             }, 10000);
 
             // Store the activateTimeoutId in timeoutMap
@@ -201,6 +212,51 @@ const attemptAction = async (signal, attempts, successSignal) => {
     return attempts;
 };
 
+// Early login prompt
+const earlyLogin = async () => {
+    try {
+        // Generate a unique notification ID
+        const notificationId = `login-reminder-${Date.now()}`;
+
+        // Register the button click listener BEFORE creating the notification
+        const buttonClickListener = (notifyId, btnIdx) => {
+            if (notifyId !== notificationId) return; // Ensure the correct notification is handled
+
+            if (btnIdx !== 0) {
+                chrome.notifications.clear(notificationId); // Clear the notification
+                return;
+            }
+            const newLogInTime = new Date();
+            chrome.alarms.create(constants.Login, { when: newLogInTime.getTime() });
+            notify('Login Initiated', `Early Login Initiated.`);
+            chrome.notifications.clear(notificationId); // Clear the notification
+            log(`Early Login Initiated.`);
+
+            // Remove the listener after handling the click
+            chrome.notifications.onButtonClicked.removeListener(buttonClickListener);
+        };
+
+        // Register the button click listener
+        chrome.notifications.onButtonClicked.addListener(buttonClickListener);
+
+        // Create the persistent notification with buttons
+        chrome.notifications.create(notificationId, {
+            type: 'basic',
+            iconUrl: '/app/styles/icons/48.png',
+            title: 'Early Login',
+            message: 'Do you want to do Early Login?',
+            buttons: [
+                { title: 'Yes' },
+                { title: 'No' }
+            ],
+            requireInteraction: true, // Make the notification persistent
+            priority: 2
+        });
+    } catch (error) {
+        handleError(`Failed to early login: ${error.message}`, 'error', true);
+    }
+};
+
 // Schedule login/logout for a specific day
 const scheduleDay = async (baseDate = new Date()) => {
     try {
@@ -230,6 +286,7 @@ const scheduleDay = async (baseDate = new Date()) => {
         if (lastSignalFromFGP !== SIGNALS.LOGGED_IN && loginDateTime.getTime() > now) {
             chrome.alarms.create(constants.Login, { when: loginDateTime.getTime() });
             log(`Login scheduled for: ${loginDateTime.toString()}`);
+            earlyLogin();
         } else if (lastSignalFromFGP !== SIGNALS.LOGGED_IN) {
             chrome.alarms.create(constants.Login, { when: now + 5000 });
             log(`Login executed immediately.`);
@@ -275,23 +332,46 @@ const handleAlarm = async (alarm) => {
 // Prompt for session extension
 const promptExtension = async (userLogOutTime) => {
     try {
-        const id = await notify('Logout Reminder', 'Logout in 10 minutes. Extend session?', [
-            { title: 'Extend by 30 minutes' },
-            { title: 'Extend by 1 hour' }
-        ]);
+        // Generate a unique notification ID
+        const notificationId = `logout-reminder-${Date.now()}`;
 
+        // Register the button click listener BEFORE creating the notification
         const buttonClickListener = (notifyId, btnIdx) => {
-            if (notifyId !== id) return;
-            const extensionMs = (btnIdx === 0 ? 30 : 60) * 60000;
+            if (notifyId !== notificationId) return; // Ensure the correct notification is handled
+
+            let extensionMs;
+            if (btnIdx === 0) {
+                extensionMs = 30 * 60000; // 30 minutes
+            } else if (btnIdx === 1) {
+                extensionMs = 60 * 60000; // 60 minutes
+            }
+
             const newLogOutTime = new Date(userLogOutTime.getTime() + extensionMs);
             chrome.alarms.create(constants.Logout, { when: newLogOutTime.getTime() });
             notify('Session Extended', `Extended by ${extensionMs / 60000} minutes.`);
-            chrome.notifications.clear(id);
+            chrome.notifications.clear(notificationId); // Clear the notification
             log(`Session extended by ${extensionMs / 60000} minutes.`);
+
+            // Remove the listener after handling the click
             chrome.notifications.onButtonClicked.removeListener(buttonClickListener);
         };
 
+        // Register the button click listener
         chrome.notifications.onButtonClicked.addListener(buttonClickListener);
+
+        // Create the persistent notification with buttons
+        chrome.notifications.create(notificationId, {
+            type: 'basic',
+            iconUrl: '/app/styles/icons/48.png',
+            title: 'Logout Reminder',
+            message: 'Logout in 10 minutes. Extend session?',
+            buttons: [
+                { title: 'Extend by 30 minutes' },
+                { title: 'Extend by 1 hour' }
+            ],
+            requireInteraction: true, // Make the notification persistent
+            priority: 2
+        });
     } catch (error) {
         handleError(`Failed to prompt extension: ${error.message}`, 'error', true);
     }
